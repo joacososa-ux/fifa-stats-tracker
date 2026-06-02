@@ -25,46 +25,119 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# CONTROLADOR DE BASE DE DATOS (GOOGLE SHEETS)
+# SISTEMA DE DIAGNÓSTICO INTELIGENTE DE SECRETOS (Evita que la app se congele)
 # ============================================================================
 
-# Verificar si las credenciales secretas están configuradas en Streamlit Cloud
-if "gcp_service_account" not in st.secrets or "spreadsheet_key" not in st.secrets:
+def ejecutar_diagnostico():
     st.markdown("<h1 style='text-align: center;'>⚽ FIFA Stats Tracker</h1>", unsafe_allow_html=True)
-    st.info("👋 ¡Tu aplicación ya está en la nube! Ahora falta conectar tu base de datos de Google Sheets.")
+    st.markdown("### 🔍 Panel de Autodiagnóstico de Base de Datos")
+    st.write("Tu aplicación está buscando las credenciales en Streamlit Cloud. Aquí tienes el estado actual:")
+
+    # 1. Comprobación de claves raíz
+    secretos_detectados = list(st.secrets.keys()) if hasattr(st.secrets, "keys") else []
     
+    col1, col2 = st.columns(2)
+    with col1:
+        if "spreadsheet_key" in secretos_detectados:
+            st.success("✔️ **ID del Excel ('spreadsheet_key')**: ¡Encontrado!")
+        else:
+            st.error("❌ **ID del Excel ('spreadsheet_key')**: No detectado en los secretos.")
+            
+    with col2:
+        if "gcp_service_account" in secretos_detectados:
+            st.success("✔️ **Cuenta de Google ('gcp_service_account')**: ¡Encontrada!")
+        else:
+            st.error("❌ **Cuenta de Google ('gcp_service_account')**: No detectada en los secretos.")
+
+    # 2. Análisis del bloque gcp_service_account
+    if "gcp_service_account" in secretos_detectados:
+        st.markdown("#### 👤 Detalles de tu Cuenta de Google:")
+        gcp_data = st.secrets["gcp_service_account"]
+        
+        # Comprobar si es un diccionario válido
+        if isinstance(gcp_data, dict) or hasattr(gcp_data, "keys"):
+            sub_claves = list(gcp_data.keys())
+            st.write(f"Campos leídos correctamente de tu clave JSON: `{sub_claves}`")
+            
+            # Verificaciones críticas
+            errores_gcp = []
+            if "private_key" not in sub_claves:
+                errores_gcp.append("Falta el campo 'private_key' (La clave secreta larga).")
+            if "client_email" not in sub_claves:
+                errores_gcp.append("Falta el campo 'client_email' (El correo de servicio de Google).")
+            
+            if errores_gcp:
+                for err in errores_gcp:
+                    st.warning(f"⚠️ {err}")
+            else:
+                st.success("✔️ La estructura interna de tu Cuenta de Servicio es correcta.")
+                
+                # Intentar probar conexión real con Google Sheets
+                st.markdown("#### ⚡ Probando conexión en tiempo real...")
+                try:
+                    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+                    creds = Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=scope)
+                    client = gspread.authorize(creds)
+                    
+                    if "spreadsheet_key" in secretos_detectados:
+                        # Intentar abrir la planilla
+                        sheet = client.open_by_key(st.secrets["spreadsheet_key"])
+                        st.success(f"🎉 **¡CONEXIÓN EXITOSA!** Se pudo abrir la planilla llamada: *'{sheet.title}'*")
+                        st.info("💡 Si ves este mensaje de éxito, por favor refresca tu navegador o haz un 'Reboot App' en Streamlit Cloud para iniciar la app.")
+                    else:
+                        st.warning("⚠️ No se puede probar la conexión final porque falta el ID de la planilla ('spreadsheet_key').")
+                except gspread.exceptions.APIError as api_err:
+                    st.error(f"❌ Error de API de Google: {api_err.response.json().get('error', {}).get('message')}")
+                    st.markdown("""
+                    **¿Cómo solucionarlo?**
+                    1. Abre tu planilla de Google Sheets en tu Google Drive.
+                    2. Haz clic en el botón verde **Compartir** de arriba a la derecha.
+                    3. Dale permisos de **Editor** al correo electrónico que aparece en tu JSON (`client_email`).
+                    """)
+                except Exception as ex:
+                    st.error(f"❌ Error al intentar conectar con Google Sheets: {ex}")
+        else:
+            st.error("❌ El formato de 'gcp_service_account' no es un formato TOML válido. Asegúrate de haber escrito `[gcp_service_account]` arriba de los campos y que no queden llaves `{}`.")
+
+    st.markdown("---")
     st.markdown("""
-    ### 🛠️ Pasos para activar el guardado permanente:
-    1. **Creá una planilla de Google Sheets** en tu Google Drive.
-    2. **Creá un proyecto en Google Cloud Console**, activá las APIs de *Google Drive* y *Google Sheets*, y creá una **Cuenta de Servicio** (Service Account) para obtener un archivo de clave `.json`.
-    3. **Compartí tu planilla de Google Sheets** dándole permisos de 'Editor' al correo largo de tu Cuenta de Servicio.
-    4. **Cargá los secretos en Streamlit Cloud**: Ve al panel de control de tu app en Streamlit, entra a **Settings ⚙️ -> Secrets** y pega la configuración de esta manera:
+    ### ⚙️ Instrucciones de pegado en Secrets:
+    Asegúrate de que tu caja de secretos en Streamlit Cloud se vea exactamente así (sin comas ni llaves):
     
     ```toml
-    spreadsheet_key = "TU_ID_DE_PLANILLA_DE_GOOGLE_SHEETS"
+    spreadsheet_key = "TU_ID_DE_PLANILLA_DE_EXCEL_AQUÍ"
 
     [gcp_service_account]
     type = "service_account"
     project_id = "tu-proyecto"
-    private_key_id = "..."
-    private_key = "-----BEGIN PRIVATE KEY-----\\n..."
-    client_email = "..."
-    # ... (copia y pega todas las líneas que vengan dentro de tu archivo JSON descargado)
+    private_key_id = "tu-key-id"
+    private_key = \"\"\"-----BEGIN PRIVATE KEY-----
+    (TODA TU CLAVE PRIVADA LARGA CON ENTERS)
+    -----END PRIVATE KEY-----
+    \"\"\"
+    client_email = "tu-correo-largo-de-servicio@developer.gserviceaccount.com"
+    client_id = "..."
+    auth_uri = "[https://accounts.google.com/o/oauth2/auth](https://accounts.google.com/o/oauth2/auth)"
+    token_uri = "[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)"
+    auth_provider_x509_cert_url = "[https://www.googleapis.com/oauth2/v1/certs](https://www.googleapis.com/oauth2/v1/certs)"
+    client_x509_cert_url = "..."
+    universe_domain = "googleapis.com"
     ```
-    5. ¡Actualizá esta página y listo! Tu torneo tendrá memoria eterna.
     """)
-    st.stop() # Frena la ejecución limpia aquí hasta que se configuren los secretos
 
-# Si las credenciales existen, nos conectamos de forma segura
-@st.cache_resource
-def conectar_base_de_datos():
-    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-    client = gspread.authorize(creds)
-    return client.open_by_key(st.secrets["spreadsheet_key"])
-
+# Verificar si las credenciales secretas están configuradas y son válidas
 try:
-    spreadsheet = conectar_base_de_datos()
+    # Verificamos si los secretos básicos existen
+    if "gcp_service_account" not in st.secrets or "spreadsheet_key" not in st.secrets:
+        ejecutar_diagnostico()
+        st.stop()
+    
+    # Intentamos establecer conexión real
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=scope)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open_by_key(st.secrets["spreadsheet_key"])
+    
     # Aseguramos que existan las dos pestañas en el Excel, si no, las crea
     try:
         ws_jugadores = spreadsheet.worksheet("jugadores")
@@ -77,11 +150,16 @@ try:
     except gspread.exceptions.WorksheetNotFound:
         ws_torneos = spreadsheet.add_worksheet(title="torneos", rows="500", cols="4")
         ws_torneos.append_row(["nombre", "tipo", "campeon", "descenso"])
-except Exception as e:
-    st.error(f"Error de conexión con Google Sheets: {e}")
+
+except Exception:
+    # Si falla la conexión real, ejecutamos diagnóstico detallado
+    ejecutar_diagnostico()
     st.stop()
 
-# --- Funciones de sincronización ---
+
+# ============================================================================
+# FUNCIONES DE SINCRONIZACIÓN CON GOOGLE SHEETS
+# ============================================================================
 def descargar_datos_desde_sheets():
     # Cargar Jugadores
     filas_j = ws_jugadores.get_all_records()
@@ -106,7 +184,6 @@ def descargar_datos_desde_sheets():
         })
 
 def guardar_jugadores_en_sheets():
-    # Limpiamos el contenido viejo (excepto la cabecera) y sobreescribimos todo para evitar duplicados
     ws_jugadores.clear()
     ws_jugadores.append_row(["id", "nombre", "ligas", "copas", "descensos"])
     for j in st.session_state.jugadores:
@@ -203,12 +280,12 @@ with tab_ranking:
                 with sub_col1:
                     if st.button("➖", key="btn_restar_stat"):
                         referencia_jugador[clave] = max(0, referencia_jugador[clave] - 1)
-                        guardar_jugadores_en_sheets() # Sincroniza al Excel
+                        guardar_jugadores_en_sheets()
                         st.rerun()
                 with sub_col2:
                     if st.button("➕", key="btn_sumar_stat"):
                         referencia_jugador[clave] += 1
-                        guardar_jugadores_en_sheets() # Sincroniza al Excel
+                        guardar_jugadores_en_sheets()
                         st.rerun()
 
 # ----------------------------------------------------------------------------
@@ -252,13 +329,12 @@ with tab_torneo:
                         "campeon": campeon_nombre, "descenso": descendido_nombre if hubo_descenso else "Ninguno"
                     }
                     
-                    # Sincronización Doble en la Base de Datos
                     registrar_torneo_en_sheets(nuevo_torneo)
                     guardar_jugadores_en_sheets()
                     
                     st.session_state.mensaje_exito_torneo = f"¡Torneo '{nombre_torneo}' guardado permanentemente!"
                     st.session_state.lanzar_globos = True
-                    descargar_datos_desde_sheets() # Recarga limpia
+                    descargar_datos_desde_sheets()
                     st.rerun()
 
 # ----------------------------------------------------------------------------
@@ -287,7 +363,7 @@ with tab_amigos:
             else:
                 nuevo_id = max([j["id"] for j in st.session_state.jugadores], default=0) + 1
                 st.session_state.jugadores.append({"id": nuevo_id, "nombre": nuevo_nombre.strip(), "ligas": 0, "copas": 0, "descensos": 0})
-                guardar_jugadores_en_sheets() # Sincroniza al Excel
+                guardar_jugadores_en_sheets()
                 st.session_state.mensaje_exito_jugador = f"¡{nuevo_nombre.strip()} guardado en la base de datos!"
                 st.rerun()
 
@@ -301,7 +377,7 @@ with tab_amigos:
             st.caption(f"⚠️ Se eliminará a **{jugador_a_eliminar}** del Excel permanente.")
             if st.button("Eliminar Jugador ❌", type="secondary", use_container_width=True):
                 st.session_state.jugadores = [j for j in st.session_state.jugadores if j["nombre"] != jugador_a_eliminar]
-                guardar_jugadores_en_sheets() # Sincroniza al Excel removiendo la fila
+                guardar_jugadores_en_sheets()
                 st.session_state.mensaje_exito_jugador = f"¡{jugador_a_eliminar} ha sido dado de baja!"
                 st.rerun()
 
